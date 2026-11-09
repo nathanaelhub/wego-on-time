@@ -25,8 +25,9 @@ from pathlib import Path
 
 from .schedule import Schedule, Stop, scheduled_epoch
 
-NEAR = 100.0  # metres: within this the bus is passing the stop
-DWELL = 25.0  # metres beyond its closest point that still count as "at the stop"
+NEAR = 100.0  # metres: within this the bus is at or passing the stop
+LEAVE = 300.0  # metres: it has only left once it's this far away (GPS and layover spots wobble around NEAR)
+DWELL = 25.0  # metres beyond its closest point that still count as "arrived" at the end of a line
 MAX_GAP = 120  # seconds between reports
 MAX_DELAY = 3600  # a "delay" beyond an hour is a mislabelled trip, not lateness
 
@@ -61,27 +62,78 @@ def metres(lat1, lon1, lat2, lon2) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
-def observe(pings: list[Ping], stop_lat: float, stop_lon: float, start: int, kind: str) -> tuple[int, int] | None:
-    """(observed epoch, index of the last report in the pass), or None if the bus
-    wasn't seen passing the stop from report `start` on."""
-    d = [metres(p.lat, p.lon, stop_lat, stop_lon) for p in pings]
-    j = next((i for i in range(start, len(pings)) if d[i] < NEAR), None)
-    if j is None:
-        return None
-    k = j
-    while k + 1 < len(pings) and d[k + 1] < NEAR:
-        k += 1
-    at = [i for i in range(j, k + 1) if d[i] <= min(d[j:k + 1]) + DWELL]
+def passes(d: list[float], start: int = 0) -> list[tuple[int, int, bool]]:
+    """Visits to a stop from report `start` on: (first index within NEAR, last index
+    within NEAR, whether the bus was then seen beyond LEAVE). Wandering out past NEAR
+    and back without reaching LEAVE is the same visit."""
+    out, i, n = [], start, len(d)
+    while i < n:
+        if d[i] >= NEAR:
+            i += 1
+            continue
+        j = k = i
+        while i < n and d[i] <= LEAVE:
+            if d[i] < NEAR:
+                k = i
+            i += 1
+        out.append((j, k, i < n))
+    return out
+
+
+def timed(pings: list[Ping], d: list[float], visit: tuple[int, int, bool], kind: str) -> int | None:
+    """When a visit happened: the arrival (first report at the stop, less half the gap
+    before it) or the departure (last report within NEAR, plus half the gap after it)."""
+    j, k, left = visit
     if kind == "arr":
+        at = [i for i in range(j, k + 1) if d[i] <= min(d[j:k + 1]) + DWELL]
         i = at[0]
-        if i > 0 and pings[i].ts - pings[i - 1].ts > MAX_GAP:
+        if i == 0 or pings[i].ts - pings[i - 1].ts > MAX_GAP:
             return None
-        before = pings[i - 1].ts if i > 0 else pings[i].ts
-        return round((before + pings[i].ts) / 2) if i > 0 else pings[i].ts, k
-    i = at[-1]
-    if i + 1 >= len(pings) or pings[i + 1].ts - pings[i].ts > MAX_GAP:
+        return round((pings[i - 1].ts + pings[i].ts) / 2)
+    if not left or k + 1 >= len(pings) or pings[k + 1].ts - pings[k].ts > MAX_GAP:
         return None  # never saw it leave
-    return round((pings[i].ts + pings[i + 1].ts) / 2), k
+    return round((pings[k].ts + pings[k + 1].ts) / 2)
+
+
+def observe(pings: list[Ping], stop_lat: float, stop_lon: float, start: int, kind: str,
+            before: int | None = None) -> tuple[int, int] | None:
+    """(observed epoch, index of the visit's last report) for the first visit from report
+    `start` on; or, with `before`, the LAST visit that ends before report `before`."""
+    d = [metres(p.lat, p.lon, stop_lat, stop_lon) for p in pings]
+    visits = passes(d, start)
+    if before is not None:
+        visits = [v for v in visits if v[1] < before][-1:]
+    if not visits:
+        return None
+    when = timed(pings, d, visits[0], kind)
+    return None if when is None else (when, visits[0][1])
+
+
+def start_visit(pings: list[Ping], sched: Schedule, stops: list[Stop]):
+    """The visit to the trip's starting stop that the trip really began from.
+
+    A bus is often labelled with its next trip early: arriving at the end of the
+    previous one, idling nearby, or driving empty through downtown on the way to
+    the start (passing other timepoints as it goes). The trip begins at the last
+    visit to its first stop before the bus is next seen at its second timepoint.
+
+    Returns that visit; None when the bus was never at the first stop (the trip
+    began before collection did) or the trip has no first stop; False when it was
+    at the first stop but never seen at the second timepoint afterwards.
+    """
+    if not stops[0].first or len(stops) < 2:
+        return None
+    lat, lon, _ = sched.stops[stops[0].stop_id]
+    nlat, nlon, _ = sched.stops[stops[1].stop_id]
+    here = passes([metres(p.lat, p.lon, lat, lon) for p in pings])
+    if not here:
+        return None
+    there = passes([metres(p.lat, p.lon, nlat, nlon) for p in pings])
+    for v in there:
+        before = [h for h in here if h[1] < v[0]]
+        if before:
+            return before[-1]
+    return False
 
 
 def trip_events(sched: Schedule, trip_id: str, start_date: str, pings: list[Ping]) -> list[Event]:
@@ -90,12 +142,24 @@ def trip_events(sched: Schedule, trip_id: str, start_date: str, pings: list[Ping
         return []
     pings = sorted({p.ts: p for p in pings}.values(), key=lambda p: p.ts)
     out, pos = [], 0
-    for s in trip.stops:
-        if s.stop_id not in sched.stops:
-            continue
+    stops = [s for s in trip.stops if s.stop_id in sched.stops]
+    if not stops:
+        return []
+    begin = start_visit(pings, sched, stops)
+    if begin is False:
+        return []  # at its starting stop but never seen moving on: nothing to score yet
+    for s in stops:
         lat, lon, _ = sched.stops[s.stop_id]
         kind = "arr" if s.last and not s.first else "dep"
-        seen = observe(pings, lat, lon, pos, kind)
+        if s.first:
+            if begin is None:
+                continue
+            d = [metres(p.lat, p.lon, lat, lon) for p in pings]
+            when = timed(pings, d, begin, kind)
+            seen = None if when is None else (when, begin[1])
+            pos = begin[1]  # nothing before the trip really started counts, timed or not
+        else:
+            seen = observe(pings, lat, lon, pos, kind)
         if seen is None:
             continue
         when, pos = seen

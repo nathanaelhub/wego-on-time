@@ -16,7 +16,7 @@ number can be checked rather than argued about.
 |---|---|
 | Collect | Every 30 s, WeGo's [GTFS-Realtime](https://gtfs.org/realtime/) vehicle positions: each bus, the trip it's serving, where it is, and when it reported. Four GitHub Actions shifts of about 5¼ hours cover the service day. |
 | Match | Each trip's reports are walked in time order against its **timepoints** in stop order, so a loop route passing the same corner twice is matched to the right visit. |
-| Time | The bus is at a stop while within 100 m. Its **departure** is the last report at the stop plus half the gap to the next; at the end of a line it's the **arrival**. |
+| Time | The bus is at a stop while within 100 m and has left once it is 300 m away. Its **departure** is the last report at the stop plus half the gap to the next; at the end of a line it's the **arrival**. |
 | Score | Delay = observed − scheduled. **On time = no more than 1 minute early and no more than 5 minutes late.** At the end of a line only lateness counts. |
 | Report | Percentages with 95% (Wilson) ranges; routes and stops with fewer than 100 observed departures aren't ranked. |
 
@@ -33,6 +33,24 @@ What's deliberately left out, and why:
 **The on-time definition.** WeGo's own definition wasn't found published. 1 minute early to 5
 minutes late is the range a Transportation Research Board study found matches most US agencies'
 definitions. The thresholds are settings in `src/wego_on_time/report.py`.
+
+## Checking the method
+
+The first version was run on 90 minutes of the live feed (Nov 9, 2026, 3:11–4:41pm) and every
+implausible result was traced back to its GPS reports before anything was published. Three kinds
+of false "early departures" turned up, all from buses carrying a trip's label before the trip
+really starts, and each is now a test in `tests/test_arrivals.py`:
+
+| What the bus did | What the first version scored | Rule now |
+|---|---|---|
+| Pulled from the bay to a layover spot 83 m away and waited 50 minutes | Left 50 minutes early | A bus has only left once it's 300 m away |
+| GPS wobbled across the 100 m line during a layover (46 → 119 → 46 m) | Left 14 minutes early | Same rule: crossing 100 m isn't leaving |
+| Ended its previous trip at the stop, or drove empty past downtown timepoints on the way to the start | Left 24–54 minutes early | A trip starts at its last visit to its first stop before it's seen at the next timepoint; nothing earlier counts |
+
+On that sample, departures from a trip's first stop recorded as early fell from 9.7% to 2.1%, the
+most extreme early departure went from 54 minutes to 4½, and a random audit of scored events
+matched their GPS tracks. Timing is to within about 15 seconds (half the 30-second reporting
+interval), well inside the 1- and 5-minute thresholds.
 
 ## Findings
 

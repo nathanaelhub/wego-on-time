@@ -72,8 +72,8 @@ def test_a_loop_route_passing_a_stop_twice_uses_the_right_visit():
 
 
 def test_delays_beyond_an_hour_are_dropped_as_mislabelled():
-    stops = [Stop(1, "A", 8 * 3600, first=True)]
-    pts = [(7200, A), (7230, A + 0.003)]
+    stops = [Stop(1, "A", 8 * 3600, first=True), Stop(5, "B", 8 * 3600 + 300)]
+    pts = [(7200, A), (7230, A + 0.003), (7500, B - 0.003)]
     assert trip_events(sched(stops), "t", "20261109", track(pts)) == []
 
 
@@ -86,11 +86,57 @@ def test_gtfs_times_past_midnight_and_on_dst_days():
 
 
 def test_write_merges_and_never_double_counts(tmp_path: Path):
-    stops = [Stop(1, "A", 8 * 3600, first=True)]
-    ev = trip_events(sched(stops), "t", "20261109", track([(0, A), (30, A + 0.003)]))
+    stops = [Stop(1, "A", 8 * 3600, first=True), Stop(5, "B", 8 * 3600 + 300)]
+    ev = trip_events(sched(stops), "t", "20261109", track([(0, A), (30, A + 0.003), (300, B), (330, B + 0.003)]))[:1]
     write(ev, tmp_path)
     write(ev, tmp_path)  # the same shift processed twice
     rows = read_events(tmp_path)
     assert len(rows) == 1 and rows[0]["delay"] == 15
     with gzip.open(tmp_path / "2026-11-09.csv.gz", "rt") as f:
         assert f.readline().startswith("service_date,route,trip_id")
+
+
+# Patterns found in WeGo's real feed on Nov 9 2026, where the first version of the
+# matcher scored a departure that hadn't happened.
+M = 0.000009  # about one metre of latitude
+ORIGIN = [Stop(1, "A", 8 * 3600, first=True), Stop(5, "B", 8 * 3600 + 300)]
+
+
+def test_a_bus_moving_to_a_layover_spot_near_the_stop_has_not_left():
+    # 9 m from the bay, then waits 83 m away for 20 minutes, then leaves for B
+    pts = [(-1500, A + 9 * M), (-1470, A + 38 * M)] + [(t, A + 83 * M) for t in range(-1440, 1, 30)] + \
+          [(30, A + 400 * M), (300, B), (330, B + 400 * M)]
+    ev = trip_events(sched(ORIGIN), "t", "20261109", track(pts))
+    assert ev[0].delay == 15  # left between t=0 and t=30, not 25 minutes early
+
+
+def test_gps_wobbling_across_the_radius_is_one_visit():
+    pts = [(-120, A + 46 * M), (-90, A + 119 * M), (-60, A + 46 * M), (-30, A + 131 * M), (0, A + 46 * M),
+           (30, A + 500 * M), (300, B), (330, B + 400 * M)]
+    ev = trip_events(sched(ORIGIN), "t", "20261109", track(pts))
+    assert ev[0].delay == 15
+
+
+def test_a_trip_start_uses_the_last_visit_before_the_next_timepoint():
+    # swings past A 28 minutes early (end of its previous trip), goes away, comes back and leaves on time
+    pts = [(-1700, A + 25 * M), (-1670, A + 360 * M), (-1640, A + 600 * M), (-60, A), (-30, A), (0, A),
+           (30, A + 400 * M), (300, B), (330, B + 400 * M)]
+    ev = trip_events(sched(ORIGIN), "t", "20261109", track(pts))
+    assert [e.stop_id for e in ev] == ["A", "B"] and ev[0].delay == 15
+
+
+def test_a_trip_start_is_not_scored_unless_the_bus_reaches_the_next_timepoint():
+    pts = [(-60, A), (0, A), (30, A + 400 * M), (60, A + 800 * M)]  # never seen at B
+    assert trip_events(sched(ORIGIN), "t", "20261109", track(pts)) == []
+
+
+def test_timepoints_passed_on_the_way_to_the_start_do_not_count():
+    # an express bus labelled with its trip early drives empty past B on its way to A,
+    # waits at A, and the shift ends before it leaves: nothing about this trip is known yet
+    stops = [Stop(1, "A", 8 * 3600, first=True), Stop(3, "B", 8 * 3600 + 600), Stop(7, "C", 8 * 3600 + 3600, last=True)]
+    pts = [(-3000, B - 0.004), (-2970, B), (-2940, B - 0.004), (-2800, A + 0.002)] + [(t, A) for t in range(-2700, 1, 30)]
+    assert trip_events(sched(stops), "t", "20261109", track(pts)) == []
+    # the same bus, seen leaving A and reaching B: only the real trip is scored
+    pts += [(30, A + 0.004), (630, B), (660, B + 0.004)]
+    ev = trip_events(sched(stops), "t", "20261109", track(pts))
+    assert [(e.stop_id, e.delay) for e in ev] == [("A", 15), ("B", 45)]
