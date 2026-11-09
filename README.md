@@ -45,7 +45,7 @@ really starts, and each is now a test in `tests/test_arrivals.py`:
 |---|---|---|
 | Pulled from the bay to a layover spot 83 m away and waited 50 minutes | Left 50 minutes early | A bus has only left once it's 300 m away |
 | GPS wobbled across the 100 m line during a layover (46 → 119 → 46 m) | Left 14 minutes early | Same rule: crossing 100 m isn't leaving |
-| Ended its previous trip at the stop, or drove empty past downtown timepoints on the way to the start | Left 24–54 minutes early | A trip starts at its last visit to its first stop before it's seen at the next timepoint; nothing earlier counts |
+| Ended its previous trip at the stop, or drove empty past downtown timepoints on the way to the start | Left 23–54 minutes early | A trip starts at its last visit to its first stop before it's seen at the next timepoint; nothing earlier counts |
 
 On that sample, departures from a trip's first stop recorded as early fell from 9.7% to 2.1%, the
 most extreme early departure went from 54 minutes to 4½, and a random audit of scored events

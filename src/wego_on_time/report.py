@@ -152,7 +152,8 @@ def long_day(d: str) -> str:
 def page(rep: dict) -> str:
     e = html.escape
     o, days, cov = rep["overall"], rep["days"], rep["coverage"]
-    span = f"{long_day(days[0])} to {long_day(days[-1])}" if days else "no days yet"
+    span = ("no days yet" if not days else long_day(days[0]) if len(days) == 1
+            else f"{long_day(days[0])} to {long_day(days[-1])}")
     prelim = len(days) < 14
     shown = [r for r in rep["routes"] if r["shown"]]
     hidden = [r for r in rep["routes"] if not r["shown"]]
