@@ -1,0 +1,23 @@
+[project]
+name = "wego-on-time"
+version = "0.1.0"
+description = "How often Nashville's WeGo buses are on time, measured from WeGo's own live GPS feed"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["gtfs-realtime-bindings>=1.0.0"]
+
+[project.scripts]
+wego = "wego_on_time.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

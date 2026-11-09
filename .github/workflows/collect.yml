@@ -1,0 +1,70 @@
+name: collect
+
+# Four shifts of about 5 hours 15 minutes cover WeGo's service day (roughly 4:30am to 1:30am).
+# Times are UTC; they're set for Central Standard Time, so under daylight time each shift starts an hour earlier.
+on:
+  schedule:
+    - cron: "30 10 * * *"  # 4:30am
+    - cron: "45 15 * * *"  # 9:45am
+    - cron: "0 21 * * *"   # 3:00pm
+    - cron: "15 2 * * *"   # 8:15pm
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "How long to collect"
+        default: "5.25"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  shift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - name: Collect vehicle positions
+        run: uv run wego collect --hours "${{ inputs.hours || '5.25' }}" --out positions.csv
+      - name: Keep the raw positions for 30 days
+        if: always()
+        run: gzip -kf positions.csv
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: positions-${{ github.run_id }}
+          path: positions.csv.gz
+          retention-days: 30
+      - name: Score timepoints
+        if: always()
+        run: uv run wego process positions.csv
+      - name: Commit the shift's events
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet && exit 0
+          git commit -m "data: shift ending $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && exit 0; sleep $((i * 10)); done
+          exit 1
+      - name: Build the site
+        if: always()
+        run: uv run wego site --out _site
+      - uses: actions/upload-pages-artifact@v3
+        if: always()
+        with:
+          path: _site
+      - id: deployment
+        if: always()
+        uses: actions/deploy-pages@v4

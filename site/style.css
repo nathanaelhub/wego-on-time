@@ -1,0 +1,34 @@
+:root {
+  --bg: #f7f5f0; --panel: #ffffff; --ink: #1d2320; --muted: #5b625e; --line: #dcd8cf; --accent: #1f5f8a;
+  --early: #8a2f24; --ontime: #1f6f5c; --late: #b07a10; --note-bg: #fbefd5;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #141618; --panel: #1c1f22; --ink: #e8ebe9; --muted: #a3aba7; --line: #31363a; --accent: #8cc3ea;
+    --early: #f2a297; --ontime: #7fd8bf; --late: #f0c36b; --note-bg: #3a3020; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 900px; margin: 0 auto; padding: 0 16px; }
+.top { border-bottom: 1px solid var(--line); background: var(--panel); }
+.eyebrow { margin: 0; padding: 12px 0; font-weight: 600; }
+h1 { font-size: 30px; line-height: 1.2; margin: 28px 0 8px; }
+h2 { font-size: 20px; margin: 32px 0 8px; }
+a { color: var(--accent); }
+.lede { font-size: 18px; margin: 0 0 16px; }
+.hint, .muted { color: var(--muted); font-size: 14px; }
+.hint { margin: 0 0 10px; }
+.note { background: var(--note-bg); border-radius: 10px; padding: 10px 14px; }
+.big { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; }
+.big p { margin: 4px 0; }
+.num-big { font-size: 34px; font-weight: 700; color: var(--ontime); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+tbody th { font-weight: 500; white-space: normal; min-width: 11rem; }
+thead th { color: var(--muted); font-weight: 500; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.bar { display: flex; width: 120px; height: 10px; border-radius: 5px; overflow: hidden; background: var(--line); }
+.bar i { display: block; height: 100%; }
+.bar .e { background: var(--early); } .bar .o { background: var(--ontime); } .bar .l { background: var(--late); }
+.about { margin: 40px 0 48px; border-top: 1px solid var(--line); }
+.about li { margin-bottom: 6px; }
